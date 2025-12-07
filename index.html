@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mein Dictionary</title>
+  <link rel="icon" href="/static/favicon.ico" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="page">
+    <header class="hero">
+      <div class="hero__title">Mein Dictionary</div>
+      <div class="hero__subtitle">梅茵辞典</div>
+    </header>
+
+    <main class="grid">
+      <section class="card">
+        <div class="card__header">
+          <div>
+            <div class="eyebrow">Upload</div>
+            <h2 class="card__title">上传文件</h2>
+            <p class="card__subtitle">选择需要上传的文件</p>
+          </div>
+        </div>
+        <form id="upload-form" class="upload" autocomplete="off">
+          <label class="upload__field" for="file-input">
+            <span class="upload__label">选择一个文件</span>
+            <input id="file-input" name="file" type="file" required />
+          </label>
+          <button type="submit" class="btn" disabled>上传</button>
+        </form>
+        <div id="status" class="status" role="status">等待文件中...</div>
+      </section>
+
+      <section class="card">
+        <div class="card__header">
+          <div>
+            <div class="eyebrow">Download</div>
+            <h2 class="card__title">下载文件</h2>
+            <p class="card__subtitle">点击需要下载的文件</p>
+          </div>
+          <button class="icon-btn refresh-btn" id="refresh">↻</button>
+        </div>
+        <ul id="file-list" class="list"></ul>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const cards = document.querySelectorAll('.card');
+    const uploadForm = document.getElementById('upload-form');
+    const fileInput = document.getElementById('file-input');
+    const fileLabel = document.querySelector('.upload__label');
+    const statusEl = document.getElementById('status');
+    const fileList = document.getElementById('file-list');
+    const refreshBtn = document.getElementById('refresh');
+    const uploadButton = uploadForm.querySelector('.btn');
+
+    const setStatus = (message, tone = 'muted', loading = false) => {
+      statusEl.textContent = message;
+      statusEl.dataset.tone = tone;
+      statusEl.classList.toggle('loading', loading);
+      statusEl.classList.remove('flash');
+      void statusEl.offsetWidth;
+      statusEl.classList.add('flash');
+    };
+
+    const updateUploadState = () => {
+      const hasFile = fileInput.files.length > 0;
+      uploadButton.disabled = !hasFile;
+      fileLabel.classList.toggle('empty', !hasFile);
+      if (!hasFile) {
+        fileLabel.textContent = '选择一个文件';
+      }
+    };
+
+    fileInput.addEventListener('change', () => {
+      if (fileInput.files.length) {
+        fileLabel.textContent = fileInput.files[0].name;
+      }
+      updateUploadState();
+    });
+
+    const renderFiles = (files) => {
+      fileList.innerHTML = '';
+      if (!files.length) {
+        fileList.innerHTML = '<li class="list__empty">暂无文件</li>';
+        return;
+      }
+      files.forEach(({ name, created_at }, index) => {
+        const li = document.createElement('li');
+        li.className = 'list__item pop-in';
+
+        const row = document.createElement('div');
+        row.className = 'list__row';
+
+        const infoBtn = document.createElement('button');
+        infoBtn.className = 'ghost-btn file-entry';
+        const fileName = document.createElement('div');
+        fileName.className = 'file-name';
+        fileName.textContent = name;
+        const fileTime = document.createElement('div');
+        fileTime.className = 'file-time';
+        fileTime.textContent = new Date(created_at).toLocaleString();
+        infoBtn.appendChild(fileName);
+        infoBtn.appendChild(fileTime);
+        infoBtn.addEventListener('click', () => downloadFile(name));
+
+        const actions = document.createElement('div');
+        actions.className = 'list__actions';
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'icon-btn danger';
+        deleteBtn.type = 'button';
+        deleteBtn.textContent = '✕';
+        deleteBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          deleteFile(name, li);
+        });
+        actions.appendChild(deleteBtn);
+
+        row.appendChild(infoBtn);
+        row.appendChild(actions);
+
+        li.appendChild(row);
+        fileList.appendChild(li);
+      });
+    };
+
+    const loadFiles = async (announce = false) => {
+      const res = await fetch('/files');
+      const data = await res.json();
+      const files = data.files || [];
+      renderFiles(files);
+      if (announce) {
+        const count = files.length;
+        setStatus(`列表已更新`, 'muted');
+      }
+    };
+
+    const downloadFile = async (name) => {
+      setStatus(`正在下载 ${name}...`, 'muted', true);
+      const res = await fetch(`/download/${encodeURIComponent(name)}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      setStatus(`已下载 ${name}`, 'positive');
+    };
+
+    const deleteFile = async (name, li) => {
+      setStatus(`正在删除 ${name}...`, 'muted', true);
+      li.classList.add('removing');
+      li.addEventListener('animationend', () => li.remove(), { once: true });
+      await fetch(`/files/${encodeURIComponent(name)}`, { method: 'DELETE' });
+      setStatus(`已删除 ${name}`, 'positive');
+      loadFiles();
+    };
+
+    uploadForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (!fileInput.files.length) return;
+      const formData = new FormData();
+      formData.append('file', fileInput.files[0]);
+      setStatus('正在上传并处理...', 'muted', true);
+      uploadButton.disabled = true;
+      const res = await fetch('/upload', { method: 'POST', body: formData });
+      const data = await res.json();
+      if (!res.ok) {
+        const message = data.error || '处理失败';
+        console.error('处理出错:', message);
+        setStatus(message, 'error');
+        uploadButton.disabled = false;
+        return;
+      }
+      setStatus(`已保存 ${data.stored_as}`, 'positive');
+      fileLabel.textContent = data.stored_as;
+      fileLabel.classList.remove('empty');
+      fileInput.value = '';
+      updateUploadState();
+      loadFiles();
+    });
+
+    refreshBtn.addEventListener('click', async (event) => {
+      event.preventDefault();
+      setStatus('正在重置列表...', 'muted', true);
+      const items = Array.from(fileList.querySelectorAll('.list__item'));
+      if (!items.length) {
+        await fetch('/refresh', { method: 'POST' });
+        loadFiles(true);
+        return;
+      }
+
+      await Promise.all(
+        items.map((item, idx) =>
+          new Promise((resolve) => {
+            item.style.animationDelay = `${idx * 80}ms`;
+            item.classList.add('removing');
+            item.addEventListener('animationend', resolve, { once: true });
+          })
+        )
+      );
+
+      await fetch('/refresh', { method: 'POST' });
+      loadFiles(true);
+    });
+
+    const revealCards = () => {
+      cards.forEach((card, index) => {
+        setTimeout(() => card.classList.add('is-visible'), index * 120);
+      });
+    };
+
+    loadFiles();
+    revealCards();
+    updateUploadState();
+  </script>
+</body>
+</html>
