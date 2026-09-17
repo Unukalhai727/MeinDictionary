@@ -31,7 +31,9 @@ async def processor(file: bytes, title: str) -> tuple[bytes, str]:
                     zout.writestr(info.filename, zin.read(info.filename))
                     continue
 
-                text = zin.read(info.filename).decode('utf-8')
+                raw = zin.read(info.filename)
+                encoding = chardet.detect(raw)['encoding'] or 'utf-8'
+                text = raw.decode(encoding)
                 text = await convert(text, substitution_dict)
                 zout.writestr(info.filename, text.encode('utf-8'))
     except zipfile.BadZipFile:
